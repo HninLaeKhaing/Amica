@@ -16,7 +16,7 @@
             border-radius: 1.5rem;
             box-shadow: 0 8px 16px rgba(17, 24, 39, 0.05);
         }
-        /* Custom styles for chat/notes */
+        /* Custom styles for chat/notes (retained for structure, though chat is moved) */
         .chat-container {
             height: 400px;
             overflow-y: auto;
@@ -105,11 +105,6 @@
                 }
             });
             
-            // --- FIX: Activate/Refresh Notes for Chatbot Page ---
-            if (pageId === 'chatbot-page-container' && window.isAuthenticated && window.renderNotes) {
-                window.renderNotes(); // Refresh notes display when navigating to the chatbot page
-            }
-            
             // Update nav link active state
             document.querySelectorAll('nav a[data-page-target]').forEach(link => {
                 link.classList.remove('border-indigo-500', 'text-indigo-600');
@@ -161,7 +156,6 @@
                 // DEMO MODE (Firebase NOT configured)
                 sessionIdElement.textContent = 'Session: Demo';
                 sessionIdElement.title = 'Firebase is not configured. Data is not persistent.';
-                window.isDemoMode = true; // Ensure demo mode is set globally
                 modeIndicator.textContent = 'Mode: Demo';
                 modeIndicator.className = 'px-3 py-1 text-xs font-semibold rounded-full demo-mode-indicator transition duration-150';
             }
@@ -209,7 +203,7 @@
                 });
                 // Sort by timestamp
                 window.USER_STATE.notes = notes.sort((a, b) => b.timestamp - a.timestamp); 
-                window.renderNotes(); // Call rendering function on update
+                window.renderNotes(); // Call rendering function
                 console.log("Notes loaded:", window.USER_STATE.notes.length);
             }, (error) => {
                 console.error("Error setting up notes listener:", error);
@@ -261,6 +255,7 @@
             // Start at the welcome page initially.
             document.addEventListener('DOMContentLoaded', () => {
                 // If the user isn't actively authenticated yet, show welcome page.
+                // The onAuthStateChanged listener handles the rest.
                 if (!auth.currentUser) {
                     window.showPage('welcome-page');
                 }
@@ -279,6 +274,8 @@
 
         // --- CHATBOT & GEMINI API INTEGRATION ---
         
+        // This function is still required for the Chatbot page logic, 
+        // even though the main chat UI is removed from the landing page.
         const demoResponses = [
             "I hear the feeling of overwhelm. It sounds heavy. Could you tell me one specific thing that is making you feel this way right now?",
             "That's a valid feeling. Let's take a deep breath together. When we break down big feelings into smaller pieces, they often feel more manageable. What small step can you take today?",
@@ -546,50 +543,17 @@
     <div id="chatbot-page-container" class="page-container w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 space-y-12 hidden">
         <h1 class="text-5xl font-extrabold text-center text-gray-900 border-b pb-4">Amica Chatbot: Your Digital Companion</h1>
         
-        <!-- Live Chat Session (Integrated) -->
-        <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
-            <!-- Chat Window and Input -->
-            <div class="lg:col-span-2 section-card bg-white p-6 border border-gray-100">
-                <h3 class="text-2xl font-semibold text-indigo-600 mb-4">Live Chat Session</h3>
-                <!-- Chat Window -->
-                <div id="chat-window-chatbot" class="chat-container mb-4 p-4 space-y-4">
-                    <div class="flex justify-start">
-                        <div class="amica-message p-3 rounded-xl rounded-tl-none shadow">
-                            Welcome! I'm Amica, your mental wellness companion. How can I support you on your journey today?
-                        </div>
-                    </div>
-                </div>
-                
-                <!-- Chat Input -->
-                <div class="flex space-x-3">
-                    <input id="chat-input" type="text" placeholder="Type your message here..." class="flex-grow p-3 border border-gray-300 rounded-xl focus:ring-indigo-500 focus:border-indigo-500 shadow-sm" />
-                    <button id="chat-send-button" class="px-6 py-3 bg-indigo-600 text-white font-semibold rounded-xl hover:bg-indigo-700 transition duration-150 shadow-md">
-                        Send
-                    </button>
-                </div>
-            </div>
-
-            <!-- CIM Status Panel -->
-            <div class="lg:col-span-1 section-card bg-gray-800 p-6 border border-gray-700">
-                <h3 class="text-2xl font-bold text-white mb-4 border-b border-indigo-400 pb-2">Personal Journey Status (CIM Trace)</h3>
-                <p class="text-gray-400 text-sm mb-4">
-                    This panel reflects the live communication between your browser and Amica's Core Intelligence Module (CIM).
-                </p>
-                <div class="mb-4">
-                    <h4 class="text-lg font-semibold text-pink-400 mb-1">Amica's Dialogue Output</h4>
-                    <div id="cim-dialogue-output" class="p-3 bg-gray-900 rounded-lg text-white font-medium text-sm italic min-h-[50px]">
-                        Awaiting your first message...
-                    </div>
-                </div>
-                <div>
-                    <h4 class="text-lg font-semibold text-purple-400 mb-1">API Status & Action Command</h4>
-                    <div id="cim-action-output" class="p-3 bg-gray-900 rounded-lg text-green-400 font-mono text-xs min-h-[50px] overflow-auto">
-                        Idle: Ready_For_User_Input
-                    </div>
-                </div>
-            </div>
-        </div>
-
+        <!-- Chatbot Capabilities -->
+        <section class="section-card bg-white p-8 space-y-6">
+            <h2 class="text-3xl font-bold text-indigo-700">What Amica Chatbot Does</h2>
+            <p class="text-lg text-gray-600">The Amica Chatbot provides a safe space for real-time **mental health supporting conversation**. Based on CBT, it helps you:</p>
+            <ul class="grid grid-cols-1 md:grid-cols-2 gap-4 text-gray-700">
+                <li class="flex items-center"><span class="text-pink-500 mr-2 text-xl">&bull;</span>Identify emotional triggers and thought distortions.</li>
+                <li class="flex items-center"><span class="text-pink-500 mr-2 text-xl">&bull;</span>Practice grounding and emotional regulation techniques.</li>
+                <li class="flex items-center"><span class="text-pink-500 mr-2 text-xl">&bull;</span>Set and review small, actionable wellness goals.</li>
+                <li class="flex items-center"><span class="text-pink-500 mr-2 text-xl">&bull;</span>Receive empathetic, non-judgmental guidance 24/7.</li>
+            </ul>
+        </section>
 
         <!-- Your Journey Notes Session -->
         <section class="section-card bg-indigo-50 p-8 space-y-6">
@@ -599,6 +563,15 @@
                 <!-- Notes will be rendered here by setupNotesListener and renderNotes functions -->
                 <p class="text-gray-500 italic p-4 text-center">Loading your personal notes...</p>
             </div>
+        </section>
+
+        <!-- Visit Live Chatbot Session -->
+        <section class="section-card bg-pink-100 p-8 text-center space-y-4">
+            <h2 class="text-3xl font-bold text-pink-700">Engage with the Free Amica Chatbot</h2>
+            <p class="text-xl text-gray-800 max-w-2xl mx-auto">Ready to start a live, private session? Click the button below to be redirected to our full-featured Streamlit application.</p>
+            <a href="https://amicarobot-mwq6taxcz847ppunwsotpb.streamlit.app/" target="_blank" class="inline-block px-10 py-4 text-xl font-bold rounded-xl bg-indigo-600 text-white hover:bg-indigo-700 transition duration-150 shadow-xl">
+                Visit Amica Streamlit Chatbot
+            </a>
         </section>
     </div>
 
@@ -610,7 +583,7 @@
         <section class="section-card bg-white p-8 flex flex-col lg:flex-row gap-10 items-center">
             <div class="lg:w-1/3">
                 <div class="p-8 bg-pink-100 rounded-3xl shadow-2xl">
-                    <img src="assets/amica_robot_product.jpg" 
+                    <img src="assets/robot.jpg" 
                         onerror="this.onerror=null; this.src='https://placehold.co/300x300/e9d5ff/8b5cf6?text=Amica+Robot+Product'"
                         alt="Amica Robot Product Image" 
                         class="w-full h-auto rounded-2xl">
@@ -693,16 +666,21 @@
         
         // Ensure initial page is set to welcome on load
         document.addEventListener('DOMContentLoaded', () => {
+            // Check if Firebase is configured; if so, auth listener handles the navigation.
+            // If not configured (demo mode), we still start on the welcome page.
             const isFirebaseConfigured = typeof __firebase_config !== 'undefined' && Object.keys(JSON.parse(__firebase_config)).length > 0;
             if (!isFirebaseConfigured || !window.auth || !window.auth.currentUser) {
                 window.showPage('welcome-page');
             }
         });
 
-        // --- CHATBOT UI LOGIC ---
+        // --- CHATBOT UI LOGIC (for the Chatbot page) ---
+        // Note: The main chat UI is still here, but it's on the dedicated Chatbot page now.
+        // I will add a simple note-saving mechanism based on the hidden system prompt.
         
         const chatInput = document.getElementById('chat-input');
         const sendButton = document.getElementById('chat-send-button');
+        const chatWindow = document.getElementById('chat-window-chatbot'); // Use a unique ID
         const cimDialogueOutput = document.getElementById('cim-dialogue-output');
         const cimActionOutput = document.getElementById('cim-action-output');
 
@@ -716,9 +694,7 @@
             
             const messageBubble = document.createElement('div');
             messageBubble.className = `p-3 rounded-xl shadow mt-2 ${isAmica ? 'amica-message rounded-tl-none' : 'user-message rounded-br-none'}`;
-            
-            // Render text with line breaks
-            messageBubble.innerHTML = text.replace(/\n/g, '<br>'); 
+            messageBubble.innerHTML = text; 
             
             messageContainer.appendChild(messageBubble);
             chatWindowTarget.appendChild(messageContainer);
@@ -728,11 +704,7 @@
         };
 
         const saveNote = async (amicaResponse) => {
-            // Check for authenticated user and Firebase app instance
-            if (window.isDemoMode || !window.currentUserId || !window.firebaseApp) {
-                console.warn("Cannot save note: Demo Mode or User/Firebase not ready.");
-                return;
-            }
+            if (window.isDemoMode || !window.currentUserId || !window.firebaseApp) return;
 
             const db = getFirestore(window.firebaseApp);
             const userId = window.currentUserId;
@@ -745,9 +717,8 @@
             // Remove the hidden note title from the displayed response
             const cleanResponse = amicaResponse.replace(/\[Note Title: .*?\]/, '').trim();
             
-            // Get the last user prompt for context in the note
-            const userHistory = window.USER_STATE.chat_history.filter(msg => msg.role === 'user');
-            const lastUserPrompt = userHistory.length > 0 ? userHistory[userHistory.length - 1].text : "No initial user prompt recorded for this reflection.";
+            // Save the last user prompt and the clean Amica response
+            const lastUserPrompt = window.USER_STATE.chat_history.length > 0 ? window.USER_STATE.chat_history[window.USER_STATE.chat_history.length - 1].text : "No initial context.";
             
             const noteContent = `User: "${lastUserPrompt}"\nAmica: "${cleanResponse}"`;
 
@@ -760,7 +731,6 @@
                     userId: userId
                 });
                 console.log("Note saved successfully with title:", noteTitle);
-                // The onSnapshot listener in setupNotesListener will automatically call renderNotes() here.
             } catch (error) {
                 console.error("Error saving note to Firestore:", error);
             }
@@ -789,7 +759,6 @@
                 window.USER_STATE.chat_history.push({ role: 'amica', text: response });
                 
                 // 4. Save the conversation as a note (async)
-                // This is where the magic happens that powers the "Journey Notes" session.
                 saveNote(response);
 
                 // 5. Clean response for display
@@ -815,7 +784,6 @@
             sendButton.addEventListener('click', processPrompt);
             chatInput.addEventListener('keypress', (e) => {
                 if (e.key === 'Enter') {
-                    e.preventDefault(); // Prevent new line in input
                     processPrompt();
                 }
             });
@@ -920,5 +888,47 @@
         };
 
     </script>
+
+    <!-- Chat Interface (Placed at the bottom for structure but linked to the Chatbot Page) -->
+    <div id="hidden-chat-interface" class="w-full max-w-7xl px-4 sm:px-6 lg:px-8 py-12 space-y-10 hidden">
+        <div class="grid grid-cols-1 lg:col-span-3 gap-8">
+            <div class="lg:col-span-2 section-card bg-white p-6 border border-gray-100">
+                <h3 class="text-2xl font-semibold text-indigo-600 mb-4">Live Chat Session</h3>
+                <div id="chat-window-chatbot" class="chat-container mb-4 p-4 space-y-4">
+                    <div class="flex justify-start">
+                        <div class="amica-message p-3 rounded-xl rounded-tl-none shadow">
+                            Welcome! I'm Amica, your mental wellness companion. How can I support you on your journey today?
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="flex space-x-3">
+                    <input id="chat-input" type="text" placeholder="Type your message here..." class="flex-grow p-3 border border-gray-300 rounded-xl focus:ring-indigo-500 focus:border-indigo-500 shadow-sm" />
+                    <button id="chat-send-button" class="px-6 py-3 bg-indigo-600 text-white font-semibold rounded-xl hover:bg-indigo-700 transition duration-150 shadow-md">
+                        Send
+                    </button>
+                </div>
+            </div>
+
+            <div class="lg:col-span-1 section-card bg-gray-800 p-6 border border-gray-700">
+                <h3 class="text-2xl font-bold text-white mb-4 border-b border-indigo-400 pb-2">Personal Journey Status (CIM Trace)</h3>
+                <p class="text-gray-400 text-sm mb-4">
+                    This panel reflects the live communication between your browser and Amica's Core Intelligence Module (CIM).
+                </p>
+                <div class="mb-4">
+                    <h4 class="text-lg font-semibold text-pink-400 mb-1">Amica's Dialogue Output</h4>
+                    <div id="cim-dialogue-output" class="p-3 bg-gray-900 rounded-lg text-white font-medium text-sm italic min-h-[50px]">
+                        Awaiting your first message...
+                    </div>
+                </div>
+                <div>
+                    <h4 class="text-lg font-semibold text-purple-400 mb-1">API Status & Action Command</h4>
+                    <div id="cim-action-output" class="p-3 bg-gray-900 rounded-lg text-green-400 font-mono text-xs min-h-[50px] overflow-auto">
+                        Idle: Ready_For_User_Input
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
 </body>
 </html>

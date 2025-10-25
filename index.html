@@ -557,12 +557,75 @@
 
         <!-- Your Journey Notes Session -->
         <section class="section-card bg-indigo-50 p-8 space-y-6">
-            <h2 class="text-3xl font-bold text-indigo-700">Your Journey Notes (Powered by Firebase)</h2>
-            <p class="text-lg text-gray-600">Every key reflection from your live sessions with the Amica Chatbot is automatically logged here. This helps you track patterns and progress over time.</p>
-            <div id="journey-notes-container" class="space-y-3 chat-container h-auto max-h-[500px]">
-                <!-- Notes will be rendered here by setupNotesListener and renderNotes functions -->
-                <p class="text-gray-500 italic p-4 text-center">Loading your personal notes...</p>
-            </div>
+             // PHASE 6: MOOD JOURNAL (FIRESTORE)
+        // ---------------------------------
+        
+        saveEntryBtn.addEventListener('click', () => {
+            const entryText = journalEntry.value;
+            const user = auth.currentUser;
+
+            if (!entryText.trim() || !user) return; 
+
+            db.collection('users').doc(user.uid).collection('journal').add({
+                text: entryText,
+                createdAt: firebase.firestore.FieldValue.serverTimestamp()
+            })
+            .then(() => {
+                journalEntry.value = ''; // Clear textarea
+            })
+            .catch(error => {
+                console.error('Error saving entry:', error);
+            });
+        });
+
+        let journalUnsubscribe = null; 
+        
+        function loadJournalEntries(uid) {
+            journalLoading.style.display = 'block';
+
+            if (journalUnsubscribe) {
+                journalUnsubscribe();
+            }
+
+            const query = db.collection('users').doc(uid).collection('journal')
+                .orderBy('createdAt', 'desc')
+                .limit(20);
+
+            journalUnsubscribe = query.onSnapshot(snapshot => {
+                journalList.innerHTML = '';
+                if (snapshot.empty) {
+                    journalList.innerHTML = '<p class="text-gray-500">You have no entries yet.</p>';
+                    journalLoading.style.display = 'none';
+                    return;
+                }
+                
+                snapshot.docs.forEach(doc => {
+                    const entry = doc.data();
+                    const html = createJournalEntryHTML(entry);
+                    journalList.innerHTML += html;
+                });
+                journalLoading.style.display = 'none';
+            }, error => {
+                console.error("Error loading journal:", error);
+                journalList.innerHTML = '<p class="text-red-500">Could not load entries.</p>';
+                journalLoading.style.display = 'none';
+            });
+        }
+
+        function createJournalEntryHTML(entry) {
+            const date = entry.createdAt ? entry.createdAt.toDate().toLocaleString() : 'Just now';
+            
+            const safeText = entry.text
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;");
+
+            return `
+                <div class="bg-blue-50 p-4 rounded-lg shadow-sm border border-blue-100">
+                    <p class="text-gray-800 whitespace-pre-wrap">${safeText}</p>
+                    <p class="text-xs text-gray-500 mt-2">${date}</p>
+                </div>
+            `;
+        }
         </section>
 
         <!-- Visit Live Chatbot Session -->

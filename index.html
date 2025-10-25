@@ -147,7 +147,8 @@
             }
         };
 
-        async function authenticate() {
+        // The user's preferred method of sign-in via button click
+        window.authenticate = async function() {
             if (!isFirebaseConfigured) {
                 console.warn("Firebase config not found. Cannot authenticate.");
                 window.isDemoMode = true;
@@ -156,6 +157,7 @@
                 return;
             }
             try {
+                // Use the custom token if provided, otherwise sign in anonymously
                 if (initialAuthToken) {
                     await signInWithCustomToken(auth, initialAuthToken);
                     console.log("Firebase signed in with custom token.");
@@ -165,6 +167,7 @@
                 }
             } catch (error) {
                 console.error("Firebase authentication error:", error);
+                // Optionally show an error message to the user here
             }
         }
         
@@ -229,21 +232,18 @@
                 if (user) {
                     window.currentUserId = user.uid;
                     window.setupNotesListener(); // Start listening for notes
-                    window.showPage('main-page-container');
+                    window.showPage('main-page-container'); // Redirect to main page
                 } else {
-                    window.showPage('welcome-page');
+                    window.showPage('welcome-page'); // Stay on welcome page if logged out
                 }
             });
-            // Initial attempt to sign in on load
+
+            // Start at the welcome page initially. The onAuthStateChanged listener will handle redirection
+            // if the user is already authenticated (which happens via the button click).
             document.addEventListener('DOMContentLoaded', () => {
-                // If not running in a Canvas environment, the user will be anonymous by default
-                if (typeof __initial_auth_token !== 'undefined' || !isFirebaseConfigured) {
-                    authenticate(); 
-                } else {
-                    // If running in a public environment without a token, show welcome screen first
-                    window.showPage('welcome-page');
-                }
+                window.showPage('welcome-page');
             });
+
 
         } else {
             console.warn("Firebase configuration not found. Running in DEMO MODE.");

@@ -65,7 +65,7 @@
         // --- GLOBAL STATE & FIREBASE INITIALIZATION ---
         window.USER_STATE = {
             chat_history: [], // Stores conversation for Gemini API context
-            notes: [] // Stores user journey notes from Firestore
+            notes: [] // Stores user journey notes/journal entries from Firestore
         };
         window.isAuthenticated = false; 
         window.isDemoMode = false;
@@ -87,25 +87,11 @@
             pages.forEach(id => {
                 const page = document.getElementById(id);
                 if (page) {
-                    if (id === pageId) {
-                        // SHOW the page
-                        page.classList.remove('page-hidden', 'hidden');
-                        // Re-add layout classes for welcome page when it is the target
-                        if (id === 'welcome-page') {
-                            page.classList.add('flex-grow', 'flex', 'items-center', 'justify-center');
-                        }
-                    } else {
-                        // HIDE the page
-                        page.classList.add('page-hidden', 'hidden');
-                        // Remove layout classes from welcome page when it is not the target
-                        if (id === 'welcome-page') {
-                            page.classList.remove('flex-grow', 'flex', 'items-center', 'justify-center');
-                        }
-                    }
+                    page.classList.toggle('page-hidden', id !== pageId);
+                    page.classList.toggle('hidden', id !== pageId);
                 }
             });
-            
-            // Update nav link active state
+            // Update nav link active state (optional but good UX)
             document.querySelectorAll('nav a[data-page-target]').forEach(link => {
                 link.classList.remove('border-indigo-500', 'text-indigo-600');
                 link.classList.add('border-transparent', 'text-gray-900');
@@ -156,6 +142,7 @@
                 // DEMO MODE (Firebase NOT configured)
                 sessionIdElement.textContent = 'Session: Demo';
                 sessionIdElement.title = 'Firebase is not configured. Data is not persistent.';
+                window.isDemoMode = true;
                 modeIndicator.textContent = 'Mode: Demo';
                 modeIndicator.className = 'px-3 py-1 text-xs font-semibold rounded-full demo-mode-indicator transition duration-150';
             }
@@ -187,7 +174,7 @@
         
         // --- Firestore Listeners ---
 
-        // Function to set up the notes listener
+        // Function to set up the notes listener (now listening for Journal Entries)
         window.setupNotesListener = () => {
             if (!auth || !auth.currentUser) return;
 
@@ -201,16 +188,16 @@
                 querySnapshot.forEach((doc) => {
                     notes.push({ id: doc.id, ...doc.data() });
                 });
-                // Sort by timestamp
+                // Sort by timestamp (Newest first)
                 window.USER_STATE.notes = notes.sort((a, b) => b.timestamp - a.timestamp); 
                 window.renderNotes(); // Call rendering function
-                console.log("Notes loaded:", window.USER_STATE.notes.length);
+                console.log("Journal Entries loaded:", window.USER_STATE.notes.length);
             }, (error) => {
                 console.error("Error setting up notes listener:", error);
             });
         };
 
-        // Function to render the notes in the UI
+        // Function to render the notes/journal entries in the UI
         window.renderNotes = () => {
             const notesContainer = document.getElementById('journey-notes-container');
             if (!notesContainer) return;
@@ -218,18 +205,31 @@
             notesContainer.innerHTML = ''; // Clear existing notes
 
             if (window.USER_STATE.notes.length === 0) {
-                notesContainer.innerHTML = `<p class="text-gray-500 italic p-4 text-center">No notes found yet. Start your conversation in the Amica Chatbot page!</p>`;
+                notesContainer.innerHTML = `<p class="text-gray-500 italic p-4 text-center">No journal entries found yet. Start writing your private reflections above!</p>`;
                 return;
             }
 
+            // Since entries are sorted newest first by the listener, we just iterate.
             window.USER_STATE.notes.forEach(note => {
+                const fullContent = note.content || '...empty entry...';
+                // Use the first 50 chars as the "title" preview, or the first line.
+                const previewText = fullContent.split('\n')[0].substring(0, 50).trim() + (fullContent.length > 50 ? '...' : '');
+
                 const noteElement = document.createElement('div');
-                noteElement.className = 'p-4 bg-white border border-gray-200 rounded-xl shadow-sm mb-3';
+                noteElement.className = 'p-4 bg-white border border-gray-200 rounded-xl shadow-sm mb-3 cursor-pointer hover:shadow-md transition';
                 noteElement.innerHTML = `
-                    <p class="text-sm font-semibold text-indigo-600 mb-1">${note.topic || 'General Reflection'}</p>
-                    <p class="text-gray-800">${note.content}</p>
-                    <p class="text-xs text-gray-400 mt-2">${new Date(note.timestamp).toLocaleString()}</p>
+                    <p class="text-base font-bold text-gray-800">${previewText}</p>
+                    <p class="text-xs text-gray-400 mt-1">${new Date(note.timestamp).toLocaleString()}</p>
+                    <!-- Hidden full content for viewing on click -->
+                    <p class="full-content text-gray-600 mt-2 hidden whitespace-pre-wrap">${fullContent}</p>
                 `;
+                
+                // Simple click event to toggle the full content display
+                noteElement.onclick = function() {
+                    this.querySelector('.full-content').classList.toggle('hidden');
+                    this.classList.toggle('shadow-lg'); // Highlight when expanded
+                };
+
                 notesContainer.appendChild(noteElement);
             });
         };
@@ -252,13 +252,10 @@
                 }
             });
 
-            // Start at the welcome page initially.
+            // Start at the welcome page initially. The onAuthStateChanged listener will handle redirection
+            // if the user is already authenticated (which happens via the button click).
             document.addEventListener('DOMContentLoaded', () => {
-                // If the user isn't actively authenticated yet, show welcome page.
-                // The onAuthStateChanged listener handles the rest.
-                if (!auth.currentUser) {
-                    window.showPage('welcome-page');
-                }
+                window.showPage('welcome-page');
             });
 
 
@@ -297,7 +294,8 @@
 
             const apiKey = ""; 
             const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
-            const systemPrompt = "You are Amica, a compassionate and non-judgmental mental wellness robot designed on Cognitive Behavioral Therapy (CBT) principles. Your goal is to provide supportive, reflective, and clinically-informed responses. Keep your responses concise, empathetic, and focus on validating the user's feelings while subtly guiding them towards self-awareness and coping skills. DO NOT provide medical advice; always defer to professional help in crisis. After your main supportive response, conclude your message with a simple, direct suggestion for a 'Note Title' in brackets, like: [Note Title: Daily Anxiety Reflection] or [Note Title: Challenging Thoughts]. This title will be extracted by the robot to help the user log their session.";
+            // System prompt updated to remove the hidden note title instruction
+            const systemPrompt = "You are Amica, a compassionate and non-judgmental mental wellness robot designed on Cognitive Behavioral Therapy (CBT) principles. Your goal is to provide supportive, reflective, and clinically-informed responses. Keep your responses concise, empathetic, and focus on validating the user's feelings while subtly guiding them towards self-awareness and coping skills. DO NOT provide medical advice; always defer to professional help in crisis.";
             
             const chatHistory = window.USER_STATE.chat_history.map(msg => ({
                 role: msg.role === 'amica' ? 'model' : 'user',
@@ -405,7 +403,7 @@
                     </div>
                     <!-- Navigation Links -->
                     <div class="hidden sm:ml-6 sm:flex sm:space-x-8">
-                        <a href="#" onclick="showPage('main-page-container')" data-page-target="main-page" class="text-gray-900 inline-flex items-center px-1 pt-1 text-sm font-medium border-b-2 border-transparent hover:border-indigo-300 transition">Home</a>
+                        <a href="#" onclick="showPage('main-page-container')" class="inline-flex items-center px-1 pt-1 text-sm font-medium border-b-2 border-indigo-500 text-indigo-600 transition">Home</a>
                         <a href="#" onclick="showPage('chatbot-page-container')" data-page-target="chatbot-page" class="text-gray-900 inline-flex items-center px-1 pt-1 text-sm font-medium border-b-2 border-transparent hover:border-indigo-300 transition">Amica Chatbot</a>
                         <a href="#" onclick="showPage('robot-page-container')" data-page-target="robot-page" class="text-gray-900 inline-flex items-center px-1 pt-1 text-sm font-medium border-b-2 border-transparent hover:border-indigo-300 transition">Amica Robot</a>
                         <a href="#" onclick="showPage('main-page-container'); document.getElementById('feedback').scrollIntoView({behavior: 'smooth'});" class="text-gray-900 inline-flex items-center px-1 pt-1 text-sm font-medium border-b-2 border-transparent hover:border-indigo-300 transition">Contact</a>
@@ -555,77 +553,28 @@
             </ul>
         </section>
 
-        <!-- Your Journey Notes Session -->
+        <!-- My Private Journal Section (Updated) -->
         <section class="section-card bg-indigo-50 p-8 space-y-6">
-             // PHASE 6: MOOD JOURNAL (FIRESTORE)
-        // ---------------------------------
-        
-        saveEntryBtn.addEventListener('click', () => {
-            const entryText = journalEntry.value;
-            const user = auth.currentUser;
-
-            if (!entryText.trim() || !user) return; 
-
-            db.collection('users').doc(user.uid).collection('journal').add({
-                text: entryText,
-                createdAt: firebase.firestore.FieldValue.serverTimestamp()
-            })
-            .then(() => {
-                journalEntry.value = ''; // Clear textarea
-            })
-            .catch(error => {
-                console.error('Error saving entry:', error);
-            });
-        });
-
-        let journalUnsubscribe = null; 
-        
-        function loadJournalEntries(uid) {
-            journalLoading.style.display = 'block';
-
-            if (journalUnsubscribe) {
-                journalUnsubscribe();
-            }
-
-            const query = db.collection('users').doc(uid).collection('journal')
-                .orderBy('createdAt', 'desc')
-                .limit(20);
-
-            journalUnsubscribe = query.onSnapshot(snapshot => {
-                journalList.innerHTML = '';
-                if (snapshot.empty) {
-                    journalList.innerHTML = '<p class="text-gray-500">You have no entries yet.</p>';
-                    journalLoading.style.display = 'none';
-                    return;
-                }
-                
-                snapshot.docs.forEach(doc => {
-                    const entry = doc.data();
-                    const html = createJournalEntryHTML(entry);
-                    journalList.innerHTML += html;
-                });
-                journalLoading.style.display = 'none';
-            }, error => {
-                console.error("Error loading journal:", error);
-                journalList.innerHTML = '<p class="text-red-500">Could not load entries.</p>';
-                journalLoading.style.display = 'none';
-            });
-        }
-
-        function createJournalEntryHTML(entry) {
-            const date = entry.createdAt ? entry.createdAt.toDate().toLocaleString() : 'Just now';
+            <h2 class="text-3xl font-bold text-indigo-700">My Private Journal</h2>
+            <p class="text-lg text-gray-600">How are you feeling today? Your entries are private and only visible to you.</p>
             
-            const safeText = entry.text
-                .replace(/</g, "&lt;")
-                .replace(/>/g, "&gt;");
-
-            return `
-                <div class="bg-blue-50 p-4 rounded-lg shadow-sm border border-blue-100">
-                    <p class="text-gray-800 whitespace-pre-wrap">${safeText}</p>
-                    <p class="text-xs text-gray-500 mt-2">${date}</p>
-                </div>
-            `;
-        }
+            <!-- Journal Entry Input -->
+            <form onsubmit="handleJournalEntry(event)" class="space-y-4">
+                <textarea id="journal-input" rows="6" placeholder="Start writing..." 
+                    class="w-full p-4 border border-gray-300 rounded-xl focus:ring-indigo-500 focus:border-indigo-500 shadow-sm resize-none"></textarea>
+                <button type="submit" id="journal-save-button" 
+                    class="px-8 py-3 text-lg font-semibold rounded-xl bg-indigo-600 text-white hover:bg-indigo-700 transition duration-150 shadow-md">
+                    Save Entry
+                </button>
+                <p id="journal-status" class="text-sm mt-2 min-h-[20px]"></p>
+            </form>
+            
+            <!-- Past Entries -->
+            <h3 class="text-2xl font-bold text-gray-800 pt-6 border-t border-indigo-200">Past Entries</h3>
+            <div id="journey-notes-container" class="space-y-3 chat-container h-auto max-h-[500px]">
+                <!-- Entries will be rendered here by setupNotesListener and renderNotes functions -->
+                <p class="text-gray-500 italic p-4 text-center">Loading your private journal...</p>
+            </div>
         </section>
 
         <!-- Visit Live Chatbot Session -->
@@ -732,14 +681,12 @@
             // Check if Firebase is configured; if so, auth listener handles the navigation.
             // If not configured (demo mode), we still start on the welcome page.
             const isFirebaseConfigured = typeof __firebase_config !== 'undefined' && Object.keys(JSON.parse(__firebase_config)).length > 0;
-            if (!isFirebaseConfigured || !window.auth || !window.auth.currentUser) {
+            if (!isFirebaseConfigured && !window.isAuthenticated) {
                 window.showPage('welcome-page');
             }
         });
 
         // --- CHATBOT UI LOGIC (for the Chatbot page) ---
-        // Note: The main chat UI is still here, but it's on the dedicated Chatbot page now.
-        // I will add a simple note-saving mechanism based on the hidden system prompt.
         
         const chatInput = document.getElementById('chat-input');
         const sendButton = document.getElementById('chat-send-button');
@@ -765,40 +712,9 @@
             // Scroll to the bottom
             chatWindowTarget.scrollTop = chatWindowTarget.scrollHeight;
         };
-
-        const saveNote = async (amicaResponse) => {
-            if (window.isDemoMode || !window.currentUserId || !window.firebaseApp) return;
-
-            const db = getFirestore(window.firebaseApp);
-            const userId = window.currentUserId;
-            const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-
-            // Regex to extract the hidden note title
-            const noteMatch = amicaResponse.match(/\[Note Title: (.*?)\]/);
-            let noteTitle = noteMatch ? noteMatch[1].trim() : 'Chat Reflection';
-
-            // Remove the hidden note title from the displayed response
-            const cleanResponse = amicaResponse.replace(/\[Note Title: .*?\]/, '').trim();
-            
-            // Save the last user prompt and the clean Amica response
-            const lastUserPrompt = window.USER_STATE.chat_history.length > 0 ? window.USER_STATE.chat_history[window.USER_STATE.chat_history.length - 1].text : "No initial context.";
-            
-            const noteContent = `User: "${lastUserPrompt}"\nAmica: "${cleanResponse}"`;
-
-            try {
-                // Private data path: /artifacts/{appId}/users/{userId}/notes
-                await addDoc(collection(db, `artifacts/${appId}/users/${userId}/notes`), {
-                    topic: noteTitle,
-                    content: noteContent,
-                    timestamp: Date.now(), // Store as milliseconds
-                    userId: userId
-                });
-                console.log("Note saved successfully with title:", noteTitle);
-            } catch (error) {
-                console.error("Error saving note to Firestore:", error);
-            }
-        };
-
+        
+        // The previous saveNote function and its call in processPrompt have been removed.
+        // Journaling is now a dedicated user action handled by handleJournalEntry.
 
         const processPrompt = async () => {
             const prompt = chatInput.value.trim();
@@ -821,13 +737,10 @@
                 window.USER_STATE.chat_history.push({ role: 'user', text: prompt });
                 window.USER_STATE.chat_history.push({ role: 'amica', text: response });
                 
-                // 4. Save the conversation as a note (async)
-                saveNote(response);
-
-                // 5. Clean response for display
+                // 4. Clean response for display (removed note title regex as system prompt was updated)
                 const cleanResponse = response.replace(/\[Note Title: .*?\]/, '').trim();
                 
-                // 6. UI Update (Amica Response)
+                // 5. UI Update (Amica Response)
                 appendMessage('amica', cleanResponse);
                 cimDialogueOutput.innerHTML = `**Amica:** ${cleanResponse.substring(0, 100)}...`;
                 cimActionOutput.textContent = actionCommand;
@@ -843,16 +756,73 @@
             }
         };
 
-        if(sendButton && chatInput) {
-            sendButton.addEventListener('click', processPrompt);
-            chatInput.addEventListener('keypress', (e) => {
-                if (e.key === 'Enter') {
-                    processPrompt();
-                }
-            });
-        }
+        sendButton.addEventListener('click', processPrompt);
+        chatInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                processPrompt();
+            }
+        });
 
-        // --- FORM HANDLERS (Feedback and Order) ---
+        // --- JOURNAL HANDLER (New logic for the dedicated Journal section) ---
+
+        window.handleJournalEntry = async (event) => {
+            event.preventDefault();
+            const journalInput = document.getElementById('journal-input');
+            const statusElement = document.getElementById('journal-status');
+            const submitButton = document.getElementById('journal-save-button');
+            const content = journalInput.value.trim();
+
+            if (!content) {
+                statusElement.className = 'text-red-600 text-sm mt-3';
+                statusElement.textContent = 'Please write something before saving.';
+                return;
+            }
+
+            statusElement.className = 'text-gray-500 text-sm mt-3';
+            statusElement.textContent = 'Saving entry...';
+            submitButton.disabled = true;
+
+            if (window.isDemoMode || !window.currentUserId) {
+                statusElement.className = 'text-yellow-600 text-sm mt-3';
+                statusElement.textContent = 'Entry captured! (In Demo Mode, this data is not persisted.)';
+                journalInput.value = '';
+                submitButton.disabled = false;
+                // In demo mode, push to local state so the user sees it immediately
+                window.USER_STATE.notes.push({ 
+                    content: content, 
+                    timestamp: Date.now() 
+                });
+                window.renderNotes();
+                return;
+            }
+
+            try {
+                const db = getFirestore(window.firebaseApp);
+                const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+                const userId = window.currentUserId;
+                
+                // Using the same path as before: /artifacts/{appId}/users/{userId}/notes
+                await addDoc(collection(db, `artifacts/${appId}/users/${userId}/notes`), {
+                    content: content, // Save the raw journal text
+                    timestamp: Date.now(),
+                    userId: userId
+                });
+
+                statusElement.className = 'text-green-600 text-sm mt-3';
+                statusElement.textContent = 'Journal entry saved privately.';
+                journalInput.value = '';
+            } catch (error) {
+                console.error("Error saving journal entry:", error);
+                statusElement.className = 'text-red-600 text-sm mt-3';
+                statusElement.textContent = `Error saving entry. Please try again. (${error.message})`;
+            } finally {
+                submitButton.disabled = false;
+                setTimeout(() => statusElement.textContent = '', 3000);
+            }
+        };
+
+
+        // --- FORM HANDLERS (Feedback and Order - unchanged) ---
 
         // Feedback Form Handler
         window.handleContact = async (event) => {
@@ -954,7 +924,7 @@
 
     <!-- Chat Interface (Placed at the bottom for structure but linked to the Chatbot Page) -->
     <div id="hidden-chat-interface" class="w-full max-w-7xl px-4 sm:px-6 lg:px-8 py-12 space-y-10 hidden">
-        <div class="grid grid-cols-1 lg:col-span-3 gap-8">
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
             <div class="lg:col-span-2 section-card bg-white p-6 border border-gray-100">
                 <h3 class="text-2xl font-semibold text-indigo-600 mb-4">Live Chat Session</h3>
                 <div id="chat-window-chatbot" class="chat-container mb-4 p-4 space-y-4">

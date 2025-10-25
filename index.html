@@ -3,21 +3,22 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Amica: The Clinically-Informed Mental Wellness Companion</title>
+    <title>Amica: Clinically-Informed Mental Wellness</title>
     <!-- Load Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- Use Inter font family -->
     <style>
         body {
             font-family: 'Inter', sans-serif;
-            background-color: #87CEEB; /* Very light background */
+            background-color: #f3f4f6; /* Light gray background */
         }
         .section-card {
             border-radius: 1.5rem;
             box-shadow: 0 8px 16px rgba(17, 24, 39, 0.05);
         }
+        /* Custom styles for chat/notes (retained for structure, though chat is moved) */
         .chat-container {
-            height: 400px; /* Fixed height for chat window */
+            height: 400px;
             overflow-y: auto;
             background-color: #ffffff;
             border-radius: 0.5rem;
@@ -33,56 +34,41 @@
             color: #831843; /* Dark Pink */
             max-width: 80%;
         }
-        /* Style for the subtle sign-in/session indicator */
         .session-indicator {
-            background-color: #eff6ff; /* Blue background for session info */
-            color: #3b82f6; /* Blue text */
+            background-color: #eff6ff;
+            color: #3b82f6;
         }
         .demo-mode-indicator {
-            background-color: #fef3c7; /* Yellow background for demo warning */
-            color: #d97706; /* Dark yellow/orange text */
+            background-color: #fef3c7;
+            color: #d97706;
+        }
+        /* Page transition opacity for smoother switching */
+        .page-container {
+            opacity: 1;
+            transition: opacity 0.5s ease-in-out;
+        }
+        .page-hidden {
+            opacity: 0;
+            height: 0;
+            overflow: hidden;
         }
     </style>
 
-    <style>
-a:link {
-  color: green;
-  background-color: transparent;
-  text-decoration: none;
-}
-
-a:visited {
-  color: indigo;
-  background-color: transparent;
-  text-decoration: none;
-}
-
-a:hover {
-  color: red;
-  background-color: transparent;
-  text-decoration: underline;
-}
-
-a:active {
-  color: yellow;
-  background-color: transparent;
-  text-decoration: underline;
-}
-</style>
     <!-- Firebase SDK imports and authentication logic -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getFirestore, collection, addDoc, onSnapshot, query, where } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
         import { setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
         setLogLevel('Debug');
 
         // --- GLOBAL STATE & FIREBASE INITIALIZATION ---
         window.USER_STATE = {
-            chat_history: [] // Stores conversation for Gemini API context
+            chat_history: [], // Stores conversation for Gemini API context
+            notes: [] // Stores user journey notes from Firestore
         };
-        window.isAuthenticated = false; // Initial authentication status
-        window.isDemoMode = false; // Flag for API bypass
+        window.isAuthenticated = false; 
+        window.isDemoMode = false;
         
         // Mandatory global variables provided by the environment
         const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
@@ -92,28 +78,43 @@ a:active {
         let db, auth;
         const isFirebaseConfigured = Object.keys(firebaseConfig).length > 0;
 
+        /**
+         * Simple client-side router to show a specific page container.
+         * @param {string} pageId The ID of the container to show (e.g., 'main-page-container').
+         */
+        window.showPage = (pageId) => {
+            const pages = ['welcome-page', 'main-page-container', 'chatbot-page-container', 'robot-page-container'];
+            pages.forEach(id => {
+                const page = document.getElementById(id);
+                if (page) {
+                    page.classList.toggle('page-hidden', id !== pageId);
+                    page.classList.toggle('hidden', id !== pageId);
+                }
+            });
+            // Update nav link active state (optional but good UX)
+            document.querySelectorAll('nav a[data-page-target]').forEach(link => {
+                link.classList.remove('border-indigo-500', 'text-indigo-600');
+                link.classList.add('border-transparent', 'text-gray-900');
+                if (link.getAttribute('data-page-target') + '-container' === pageId) {
+                    link.classList.add('border-indigo-500', 'text-indigo-600');
+                    link.classList.remove('border-transparent', 'text-gray-900');
+                }
+            });
+        };
+
         // Function to toggle UI visibility based on auth state
-        const toggleChatVisibility = (isAuth) => {
-            const chatSection = document.getElementById('chatbot-section');
-            const authButtonsDiv = document.getElementById('auth-buttons');
+        const toggleAuthUI = (isAuth) => {
             const sessionIdElement = document.getElementById('user-session-id');
             const modeIndicator = document.getElementById('mode-indicator');
-
-            // Toggles the visibility of the main personalized section
-            if (chatSection) {
-                 // The chat section is visible if authenticated OR if running in demo mode
-                const shouldShowChat = isAuth || !isFirebaseConfigured;
-                chatSection.classList.toggle('hidden', !shouldShowChat);
-                window.isAuthenticated = shouldShowChat; // Update global state for chat gatekeeping
-            }
+            const authButtonsDiv = document.getElementById('auth-buttons');
             
-            // Update auth buttons and session indicator
+            window.isAuthenticated = isAuth || !isFirebaseConfigured; // Update global state
             authButtonsDiv.innerHTML = ''; // Clear existing buttons
 
             if (isAuth && isFirebaseConfigured) {
                 // AUTHENTICATED MODE
                 const userId = auth.currentUser.uid;
-                sessionIdElement.textContent = `User ID: ${userId}`;
+                sessionIdElement.textContent = `User ID: ${userId.substring(0, 8)}...`;
                 sessionIdElement.title = `Full User ID: ${userId}`;
                 modeIndicator.textContent = 'Mode: Live';
                 modeIndicator.className = 'px-3 py-1 text-xs font-semibold rounded-full session-indicator transition duration-150';
@@ -124,36 +125,24 @@ a:active {
                 signOutButton.textContent = 'Sign Out';
                 signOutButton.onclick = async () => {
                     await signOut(auth);
-                    window.USER_STATE.chat_history = []; // Clear history on sign out
+                    window.USER_STATE.chat_history = [];
+                    window.USER_STATE.notes = [];
+                    window.showPage('welcome-page');
                 };
                 authButtonsDiv.appendChild(signOutButton);
-
+                
             } else if (!isAuth && isFirebaseConfigured) {
                 // LOGGED OUT MODE (Firebase configured)
                 sessionIdElement.textContent = 'Session: Anonymous';
                 sessionIdElement.title = 'You are browsing anonymously.';
                 modeIndicator.textContent = 'Mode: Offline';
                 modeIndicator.className = 'px-3 py-1 text-xs font-semibold rounded-full bg-gray-200 text-gray-500 transition duration-150';
-
-                // Sign In Button (simulates login)
-                const signInButton = document.createElement('button');
-                signInButton.className = 'px-4 py-2 text-sm font-semibold rounded-lg text-indigo-600 border border-indigo-600 hover:bg-indigo-50 transition duration-150';
-                signInButton.textContent = 'Sign In';
-                signInButton.onclick = authenticate; 
-                authButtonsDiv.appendChild(signInButton);
-
-                // Sign Up Button (simulates sign up)
-                const signUpButton = document.createElement('button');
-                signUpButton.className = 'px-4 py-2 text-sm font-semibold rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 transition duration-150 shadow-md';
-                signUpButton.textContent = 'Sign Up';
-                signUpButton.onclick = authenticate; 
-                authButtonsDiv.appendChild(signUpButton);
-
+                
             } else {
                 // DEMO MODE (Firebase NOT configured)
                 sessionIdElement.textContent = 'Session: Demo';
-                sessionIdElement.title = 'Firebase is not configured. Chat is active but data is not persistent.';
-                modeIndicator.textContent = 'Mode: Demo (API Disabled)';
+                sessionIdElement.title = 'Firebase is not configured. Data is not persistent.';
+                modeIndicator.textContent = 'Mode: Demo';
                 modeIndicator.className = 'px-3 py-1 text-xs font-semibold rounded-full demo-mode-indicator transition duration-150';
             }
         };
@@ -161,6 +150,9 @@ a:active {
         async function authenticate() {
             if (!isFirebaseConfigured) {
                 console.warn("Firebase config not found. Cannot authenticate.");
+                window.isDemoMode = true;
+                toggleAuthUI(false);
+                window.showPage('main-page-container'); // Proceed to main page in demo mode
                 return;
             }
             try {
@@ -176,6 +168,55 @@ a:active {
             }
         }
         
+        // --- Firestore Listeners ---
+
+        // Function to set up the notes listener
+        window.setupNotesListener = () => {
+            if (!auth || !auth.currentUser) return;
+
+            const userId = auth.currentUser.uid;
+            // Private data path: /artifacts/{appId}/users/{userId}/notes
+            const notesCollectionPath = `artifacts/${appId}/users/${userId}/notes`;
+            const q = query(collection(db, notesCollectionPath));
+
+            onSnapshot(q, (querySnapshot) => {
+                const notes = [];
+                querySnapshot.forEach((doc) => {
+                    notes.push({ id: doc.id, ...doc.data() });
+                });
+                // Sort by timestamp (or assume firestore returns in some order, or add explicit sorting)
+                window.USER_STATE.notes = notes.sort((a, b) => b.timestamp - a.timestamp); 
+                window.renderNotes(); // Call rendering function
+                console.log("Notes loaded:", window.USER_STATE.notes.length);
+            }, (error) => {
+                console.error("Error setting up notes listener:", error);
+            });
+        };
+
+        // Function to render the notes in the UI
+        window.renderNotes = () => {
+            const notesContainer = document.getElementById('journey-notes-container');
+            if (!notesContainer) return;
+
+            notesContainer.innerHTML = ''; // Clear existing notes
+
+            if (window.USER_STATE.notes.length === 0) {
+                notesContainer.innerHTML = `<p class="text-gray-500 italic p-4 text-center">No notes found yet. Start your conversation in the Amica Chatbot page!</p>`;
+                return;
+            }
+
+            window.USER_STATE.notes.forEach(note => {
+                const noteElement = document.createElement('div');
+                noteElement.className = 'p-4 bg-white border border-gray-200 rounded-xl shadow-sm mb-3';
+                noteElement.innerHTML = `
+                    <p class="text-sm font-semibold text-indigo-600 mb-1">${note.topic || 'General Reflection'}</p>
+                    <p class="text-gray-800">${note.content}</p>
+                    <p class="text-xs text-gray-400 mt-2">${new Date(note.timestamp).toLocaleString()}</p>
+                `;
+                notesContainer.appendChild(noteElement);
+            });
+        };
+
         if (isFirebaseConfigured) {
             window.firebaseApp = initializeApp(firebaseConfig);
             db = getFirestore(window.firebaseApp);
@@ -184,20 +225,40 @@ a:active {
             // Listener to handle authentication state changes
             onAuthStateChanged(auth, (user) => {
                 const isAuth = !!user;
-                toggleChatVisibility(isAuth);
+                toggleAuthUI(isAuth);
                 if (user) {
                     window.currentUserId = user.uid;
+                    window.setupNotesListener(); // Start listening for notes
+                    window.showPage('main-page-container');
+                } else {
+                    window.showPage('welcome-page');
                 }
             });
-            authenticate(); // Initial attempt to sign in on load
+            // Initial attempt to sign in on load
+            document.addEventListener('DOMContentLoaded', () => {
+                // If not running in a Canvas environment, the user will be anonymous by default
+                if (typeof __initial_auth_token !== 'undefined' || !isFirebaseConfigured) {
+                    authenticate(); 
+                } else {
+                    // If running in a public environment without a token, show welcome screen first
+                    window.showPage('welcome-page');
+                }
+            });
+
         } else {
             console.warn("Firebase configuration not found. Running in DEMO MODE.");
             window.isDemoMode = true;
-            // Directly call toggle with false auth state to trigger Demo Mode UI logic
-            toggleChatVisibility(false); 
+            document.addEventListener('DOMContentLoaded', () => {
+                toggleAuthUI(false);
+                window.showPage('welcome-page'); // Start at welcome
+            });
         }
 
-        // --- DEMO MODE RESPONSES ---
+
+        // --- CHATBOT & GEMINI API INTEGRATION ---
+        
+        // This function is still required for the Chatbot page logic, 
+        // even though the main chat UI is removed from the landing page.
         const demoResponses = [
             "I hear the feeling of overwhelm. It sounds heavy. Could you tell me one specific thing that is making you feel this way right now?",
             "That's a valid feeling. Let's take a deep breath together. When we break down big feelings into smaller pieces, they often feel more manageable. What small step can you take today?",
@@ -205,39 +266,26 @@ a:active {
             "Thank you for sharing that with me. That takes courage. Let's explore that thought a little deeper using the CBT framework. What evidence supports that thought, and what evidence challenges it?",
             "I'm here for you. We can try a quick grounding exercise if that would help. Can you name three things you can see, two things you can hear, and one thing you can touch?"
         ];
-
         let demoResponseIndex = 0;
-
         const getDemoResponse = () => {
             const response = demoResponses[demoResponseIndex];
-            demoResponseIndex = (demoResponseIndex + 1) % demoResponses.length; // Cycle through responses
+            demoResponseIndex = (demoResponseIndex + 1) % demoResponses.length;
             return { response: response, success: true, actionCommand: "DEMO_MODE: Bypassed_API" };
         };
 
-
-        // --- GEMINI API INTEGRATION (Now includes Demo Mode Fallback) ---
-        
-        /**
-         * Calls the Gemini API to get Amica's response, or uses demo mode if unavailable.
-         */
         window.callGeminiApi = async (prompt) => {
-            if (window.isDemoMode) {
+            if (window.isDemoMode || !window.isAuthenticated) {
                 return getDemoResponse();
             }
 
             const apiKey = ""; 
             const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
-
-            // System prompt defining Amica's persona
-            const systemPrompt = "You are Amica, a compassionate and non-judgmental mental wellness robot designed on Cognitive Behavioral Therapy (CBT) principles. Your goal is to provide supportive, reflective, and clinically-informed responses. Keep your responses concise, empathetic, and focus on validating the user's feelings while subtly guiding them towards self-awareness and coping skills. DO NOT provide medical advice; always defer to professional help in crisis. Never mention API keys or technical terms.";
+            const systemPrompt = "You are Amica, a compassionate and non-judgmental mental wellness robot designed on Cognitive Behavioral Therapy (CBT) principles. Your goal is to provide supportive, reflective, and clinically-informed responses. Keep your responses concise, empathetic, and focus on validating the user's feelings while subtly guiding them towards self-awareness and coping skills. DO NOT provide medical advice; always defer to professional help in crisis. After your main supportive response, conclude your message with a simple, direct suggestion for a 'Note Title' in brackets, like: [Note Title: Daily Anxiety Reflection] or [Note Title: Challenging Thoughts]. This title will be extracted by the robot to help the user log their session.";
             
-            // Map our internal chat history format to the API format (model/user roles)
             const chatHistory = window.USER_STATE.chat_history.map(msg => ({
                 role: msg.role === 'amica' ? 'model' : 'user',
                 parts: [{ text: msg.text }]
             }));
-            
-            // Add the current user prompt
             chatHistory.push({ role: 'user', parts: [{ text: prompt }] });
 
             const payload = {
@@ -255,47 +303,40 @@ a:active {
             };
 
             try {
-                // Use fetch with retry for robust API calls
                 const response = await fetchWithRetry(apiUrl, options);
                 const result = await response.json();
-                
                 const text = result?.candidates?.[0]?.content?.parts?.[0]?.text;
                 
                 if (text) {
                     return { response: text, success: true, actionCommand: "API_Success: Generated_Response" };
                 } else {
-                    // If the API returns a valid response object but no text (e.g., filtered content)
-                    const noTextError = "API response received, but no content generated (potential safety filter).";
+                    const noTextError = "API response received, but no content generated.";
                     console.error(noTextError, result);
                     throw new Error(noTextError);
                 }
             } catch (error) {
-                // If the real API call fails, switch to demo mode for this and future calls
                 console.error("API call failed. Falling back to Demo Mode.", error);
-                window.isDemoMode = true; // Permanent switch to demo mode for the session
+                window.isDemoMode = true; 
                 document.getElementById('mode-indicator').textContent = 'Mode: Demo (API FAILED)';
                 document.getElementById('mode-indicator').className = 'px-3 py-1 text-xs font-semibold rounded-full demo-mode-indicator transition duration-150';
 
-                // Return a specific demo response to acknowledge the error and provide a first response
                 return { 
-                    response: "I seem to be experiencing some technical difficulties connecting to my core intelligence. For now, I can provide supportive, pre-programmed guidance to help you focus on the present moment.", 
+                    response: "I seem to be experiencing some technical difficulties connecting to my core intelligence. I can provide supportive guidance to help you focus on the present moment.", 
                     success: true, 
                     actionCommand: `FALLBACK_TO_DEMO: ${error.message || 'Unknown Network Error'}` 
                 };
             }
         };
         
-        // --- Remaining Helper Functions ---
         async function fetchWithRetry(url, options, maxRetries = 5, delay = 1000) {
             for (let i = 0; i < maxRetries; i++) {
                 try {
                     const response = await fetch(url, options);
                     if (!response.ok) {
-                        // Throw an error on non-2xx response codes
                         const errorBody = await response.text();
                         const errorMsg = `HTTP error! status: ${response.status}`;
                         console.error(errorMsg, errorBody);
-                        throw new Error(errorMsg); // Throw the error for window.callGeminiApi to catch
+                        throw new Error(errorMsg); 
                     }
                     return response;
                 } catch (error) {
@@ -303,7 +344,6 @@ a:active {
                         console.error("Max retries reached. Failing request.", error);
                         throw error;
                     }
-                    // Exponential backoff
                     await new Promise(res => setTimeout(res, delay));
                     delay *= 2; 
                 }
@@ -311,185 +351,289 @@ a:active {
         }
     </script>
 </head>
+
 <body class="min-h-screen flex flex-col items-center">
 
-    <!-- Navigation Bar -->
-    <nav class="w-full bg-white shadow-sm sticky top-0 z-10">
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div class="flex justify-between items-center h-16">
-                <!-- Logo -->
-                <div class="flex-shrink-0">
-                    <span class="text-2xl font-extrabold">
-                        <span class="text-indigo-600">Amica</span>
-                        <span class="text-pink-500">.ai</span>
-                    </span>
-                </div>
-                <!-- Navigation Links -->
-                <div class="hidden sm:ml-6 sm:flex sm:space-x-8">
-                    <a href="#about" class="text-gray-900 inline-flex items-center px-1 pt-1 text-sm font-medium hover:text-indigo-600 transition">About Amica</a>
-                    <a href="#knowledge" class="text-gray-900 inline-flex items-center px-1 pt-1 text-sm font-medium hover:text-indigo-600 transition">Knowledge</a>
-                    <a href="#team" class="text-gray-900 inline-flex items-center px-1 pt-1 text-sm font-medium hover:text-indigo-600 transition">Our Team</a>
-                    <a href="#chatbot-section" class="text-gray-900 inline-flex items-center px-1 pt-1 text-sm font-medium hover:text-indigo-600 transition">Start Chat</a>
-                </div>
-                <!-- Auth Buttons & Session Info -->
-                <div class="flex items-center space-x-4">
-                    <div id="mode-indicator" class="px-3 py-1 text-xs font-semibold rounded-full session-indicator transition duration-150">
-                        Loading Mode...
-                    </div>
-                    <div id="user-session-id" class="text-xs font-mono px-3 py-1 rounded-full session-indicator transition duration-150">
-                        Loading Session...
-                    </div>
-                    <!-- Auth Buttons are managed dynamically by JavaScript -->
-                    <div id="auth-buttons" class="flex items-center space-x-3">
-                        <!-- Initial placeholder buttons (will be replaced by JS) -->
-                        <button class="px-4 py-2 text-sm font-semibold rounded-lg text-indigo-600 border border-indigo-600">Sign In</button>
-                        <button class="px-4 py-2 text-sm font-semibold rounded-lg bg-indigo-600 text-white">Sign Up</button>
-                    </div>
-                </div>
+    <!-- 1. WELCOME/LOGIN GATE PAGE -->
+    <div id="welcome-page" class="page-container flex-grow flex items-center justify-center w-full max-w-lg mx-auto p-4 hidden">
+        <div class="section-card bg-white p-10 w-full text-center space-y-6 shadow-xl border border-indigo-100">
+            <div class="text-4xl font-extrabold">
+                <span class="text-indigo-600">Amica</span>
+                <span class="text-pink-500">.ai</span>
+            </div>
+            <h1 class="text-3xl font-bold text-gray-800">Welcome to Your Wellness Journey</h1>
+            <p class="text-gray-600">Log in or Sign Up to access personalized support powered by CBT and the Amica Core Intelligence Module.</p>
+            <div id="welcome-auth-actions" class="flex flex-col space-y-3">
+                <button onclick="authenticate()" class="px-8 py-3 text-lg font-semibold rounded-xl bg-indigo-600 text-white hover:bg-indigo-700 transition duration-150 shadow-md">
+                    Sign In / Start Session
+                </button>
+                <p class="text-sm text-gray-500">Your session will be authenticated automatically via Firebase.</p>
             </div>
         </div>
-    </nav>
-
-    <!-- Main Content Area -->
-    <div class="w-full max-w-7xl px-4 sm:px-6 lg:px-8 py-12 space-y-20">
-
-        <!-- 1. Hero / About the Amica Robot -->
-        <section id="about" class="section-card bg-white p-10 border border-gray-100 flex flex-col md:flex-row items-center gap-10">
-            <div class="md:w-3/5 space-y-6">
-                <h2 class="text-5xl font-extrabold text-gray-900 leading-tight">
-                    The Future of Mental Wellness is <span class="text-indigo-600">Personal</span>.
-                </h2>
-                    
-                <p class="text-xl text-gray-600">
-                    Amica is not just an AI; it's a dedicated mental wellness chatbot + robot built on principles of **Cognitive Behavioral Therapy (CBT)** and **ethical safety**. Our core technology, the Core Intelligence Module (CIM), ensures every interaction is timely, empathetic, and tailored to your personal journey, providing supportive care right when you need it.
-                    <a href="https://amicarobot-mwq6taxcz847ppunwsotpb.streamlit.app/"> Get Free Amica Chatbot Here!</a>
-                </p>
-                
-                
-                <ul class="space-y-2 text-gray-700">
-                    <li class="flex items-center"><span class="text-green-500 mr-3 text-xl">&check;</span>Clinically-informed CBT techniques.</li>
-                    <li class="flex items-center"><span class="text-green-500 mr-3 text-xl">&check;</span>24/7, non-judgmental, immediate support.</li>
-                    <li class="flex items-center"><span class="text-green-500 mr-3 text-xl">&check;</span>Data-driven goal tracking and progress review.</li>
-                </ul>
-            </div>
-            <div class="md:w-2/5 flex justify-center">
-                <!-- AMICA ROBOT IMAGE: The image path is now a standard relative path, assuming 'robot.jpg' is in an 'assets' folder -->
-                <div class="p-8 bg-pink-100 rounded-full shadow-xl overflow-hidden">
-                    <img src="assets/robot.jpg" 
-                         onerror="this.onerror=null; this.src='https://placehold.co/192x192/fce7f3/db2777?text=Amica+Robot'"
-                         alt="Amica Robot Illustration" 
-                         class="h-60 w-60 object-cover rounded-full">
-                </div>
-            </div>
-        </section>
-
-        <!-- 2. Mental Health Knowledge Sharing Section -->
-        <section id="knowledge" class="space-y-10">
-            <h2 class="text-4xl font-bold text-center text-gray-800">Knowledge-Driven Care</h2>
-            <p class="text-center text-lg text-gray-600 max-w-3xl mx-auto">Amica's responses are grounded in accredited therapeutic practices, ensuring a safe and beneficial supportive experience.</p>
-            
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
-                <div class="section-card p-6 bg-green-50 border border-green-200 hover:shadow-lg transition">
-                    <h3 class="font-bold text-2xl text-green-700 mb-3">Structured Skill Building</h3>
-                    <p class="text-base text-gray-600 leading-relaxed">Amica guides you through **identifying and challenging unhelpful thoughts** using proven Cognitive Behavioral Therapy frameworks.</p>
-                </div>
-                <div class="section-card p-6 bg-blue-50 border border-blue-200 hover:shadow-lg transition">
-                    <h3 class="font-bold text-2xl text-blue-700 mb-3">Immediate Emotional Regulation</h3>
-                    <p class="text-base text-gray-600 leading-relaxed">It facilitates in-the-moment calming exercises like **mindful breathing and sensory grounding** for managing acute anxiety.</p>
-                </div>
-                <div class="section-card p-6 bg-pink-50 border border-pink-200 hover:shadow-lg transition">
-                    <h3 class="font-bold text-2xl text-pink-700 mb-3">Ethical and Empathetic Design</h3>
-                    <p class="text-base text-gray-600 leading-relaxed">Safety is paramount. Amica's core logic includes **crisis detection filters** and always prioritizes non-judgmental, empathetic validation.</p>
-                </div>
-            </div>
-        </section>
-
-        <!-- 3. Chatbot (Personal Journey Section) -->
-        <section id="chatbot-section" class="space-y-10 hidden">
-            <h2 class="text-4xl font-bold text-center text-gray-800">Start Your Personal Journey with Amica</h2>
-            <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                
-                <!-- Chat Interface (Visible) -->
-                <div class="lg:col-span-2 section-card bg-white p-6 border border-gray-100">
-                    <h3 class="text-2xl font-semibold text-indigo-600 mb-4">Your Private Chat Session</h3>
-                    <div id="chat-window" class="chat-container mb-4 p-4 space-y-4">
-                        <!-- Initial Message -->
-                        <div class="flex justify-start">
-                            <div class="amica-message p-3 rounded-xl rounded-tl-none shadow">
-                                Welcome! I'm Amica, your mental wellness companion. How can I support you on your journey today? (Try something like, "I'm feeling overwhelmed.")
-                            </div>
+    </div>
+    
+    <!-- 2. MAIN APPLICATION CONTENT (Hidden until logged in) -->
+    <div id="main-page-container" class="page-container w-full hidden">
+        
+        <!-- Navigation Bar -->
+        <nav class="w-full bg-white shadow-sm sticky top-0 z-10">
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                <div class="flex justify-between items-center h-16">
+                    <!-- Logo & Home Link -->
+                    <div class="flex-shrink-0">
+                        <a href="#" onclick="showPage('main-page-container')" class="text-2xl font-extrabold">
+                            <span class="text-indigo-600">Amica</span>
+                            <span class="text-pink-500">.ai</span>
+                        </a>
+                    </div>
+                    <!-- Navigation Links -->
+                    <div class="hidden sm:ml-6 sm:flex sm:space-x-8">
+                        <a href="#" onclick="showPage('main-page-container')" class="inline-flex items-center px-1 pt-1 text-sm font-medium border-b-2 border-indigo-500 text-indigo-600 transition">Home</a>
+                        <a href="#" onclick="showPage('chatbot-page-container')" data-page-target="chatbot-page" class="text-gray-900 inline-flex items-center px-1 pt-1 text-sm font-medium border-b-2 border-transparent hover:border-indigo-300 transition">Amica Chatbot</a>
+                        <a href="#" onclick="showPage('robot-page-container')" data-page-target="robot-page" class="text-gray-900 inline-flex items-center px-1 pt-1 text-sm font-medium border-b-2 border-transparent hover:border-indigo-300 transition">Amica Robot</a>
+                        <a href="#" onclick="showPage('main-page-container'); document.getElementById('feedback').scrollIntoView({behavior: 'smooth'});" class="text-gray-900 inline-flex items-center px-1 pt-1 text-sm font-medium border-b-2 border-transparent hover:border-indigo-300 transition">Contact</a>
+                    </div>
+                    <!-- Auth Buttons & Session Info -->
+                    <div class="flex items-center space-x-4">
+                        <div id="mode-indicator" class="px-3 py-1 text-xs font-semibold rounded-full session-indicator transition duration-150">
+                            Loading Mode...
+                        </div>
+                        <div id="user-session-id" class="text-xs font-mono px-3 py-1 rounded-full session-indicator transition duration-150">
+                            Loading Session...
+                        </div>
+                        <div id="auth-buttons" class="flex items-center space-x-3">
+                            <!-- Buttons managed dynamically by JavaScript -->
                         </div>
                     </div>
-                    
-                    <!-- Input and Send Button -->
-                    <div class="flex space-x-3">
-                        <input id="chat-input" type="text" placeholder="Type your message here... (e.g., 'I feel anxious today' or 'How do I start mindfulness?')" class="flex-grow p-3 border border-gray-300 rounded-xl focus:ring-indigo-500 focus:border-indigo-500 shadow-sm" />
-                        <button id="chat-send-button" class="px-6 py-3 bg-indigo-600 text-white font-semibold rounded-xl hover:bg-indigo-700 transition duration-150 shadow-md">
-                            Send
-                        </button>
-                    </div>
                 </div>
+            </div>
+        </nav>
 
-                <!-- CIM Logic Trace (Personal Session Status) -->
-                <div class="lg:col-span-1 section-card bg-gray-800 p-6 border border-gray-700">
-                    <h3 class="text-2xl font-bold text-white mb-4 border-b border-indigo-400 pb-2">Personal Journey Status</h3>
-                    <p class="text-gray-400 text-sm mb-4">
-                        This panel reflects the live communication between your browser and Amica's Core Intelligence Module (CIM).
+        <!-- Main Content Area -->
+        <div class="w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 space-y-20">
+
+            <!-- 1. Hero / About the Amica Robot -->
+            <section id="about" class="section-card bg-white p-10 border border-gray-100 flex flex-col md:flex-row items-center gap-10">
+                <div class="md:w-3/5 space-y-6">
+                    <h2 class="text-5xl font-extrabold text-gray-900 leading-tight">
+                        The Future of Mental Wellness is <span class="text-indigo-600">Personal</span>.
+                    </h2>
+                            
+                    <p class="text-xl text-gray-600">
+                        Amica is not just an AI; it's a dedicated mental wellness companion built on principles of **Cognitive Behavioral Therapy (CBT)** and **ethical safety**. Our core technology ensures every interaction is timely, empathetic, and tailored to your personal journey, providing supportive care right when you need it.
                     </p>
                     
-                    <div class="mb-4">
-                        <h4 class="text-lg font-semibold text-pink-400 mb-1">Amica's Dialogue Output</h4>
-                        <div id="cim-dialogue-output" class="p-3 bg-gray-900 rounded-lg text-white font-medium text-sm italic min-h-[50px]">
-                            Awaiting your first message...
-                        </div>
+                    <ul class="space-y-2 text-gray-700">
+                        <li class="flex items-center"><span class="text-green-500 mr-3 text-xl">&#10003;</span>Clinically-informed CBT techniques.</li>
+                        <li class="flex items-center"><span class="text-green-500 mr-3 text-xl">&#10003;</span>24/7, non-judgmental, immediate support.</li>
+                        <li class="flex items-center"><span class="text-green-500 mr-3 text-xl">&#10003;</span>Data-driven goal tracking and progress review.</li>
+                    </ul>
+                </div>
+                <div class="md:w-2/5 flex justify-center">
+                    <!-- AMICA ROBOT IMAGE -->
+                    <div class="p-8 bg-pink-100 rounded-full shadow-xl overflow-hidden">
+                        <img src="assets/robot.jpg" 
+                                onerror="this.onerror=null; this.src='https://placehold.co/192x192/fce7f3/db2777?text=Amica+Robot'"
+                                alt="Amica Robot Illustration" 
+                                class="h-60 w-60 object-cover rounded-full">
                     </div>
+                </div>
+            </section>
 
-                    <div>
-                        <h4 class="text-lg font-semibold text-purple-400 mb-1">API Status & Action Command</h4>
-                        <div id="cim-action-output" class="p-3 bg-gray-900 rounded-lg text-green-400 font-mono text-xs min-h-[50px] overflow-auto">
-                            Idle: Ready_For_User_Input
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </section>
-        
-        <!-- 4. Team Member Biographies Section -->
-        <section id="team" class="space-y-10 py-12">
-            <h2 class="text-4xl font-bold text-center text-gray-800">Meet the Core Team</h2>
-            <p class="text-center text-lg text-gray-600 max-w-3xl mx-auto">Amica was founded by a blend of clinical expertise and advanced AI engineering to ensure safety and effectiveness.</p>
-            
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
-                <!-- Team Member 1: Anurag Batham -->
-                <div class="section-card bg-white p-6 border border-gray-100 text-center">
-                    <div class="mx-auto h-60 w-60 bg-indigo-100 rounded-full flex items-center justify-center mb-4 overflow-hidden">
-                        <!-- Path changed to assets/anurag.jpg -->
-                        <img src="assets/Anurag.jpg" 
-                             onerror="this.onerror=null; this.src='https://placehold.co/128x128/e0e7ff/4338ca?text=Anurag'"
-                             alt="Profile photo of Anurag Batham" 
-                             class="h-full w-full object-cover rounded-full">
-                    </div>
-                    <h3 class="text-2xl font-bold text-gray-800"> Anurag Batham, B.Tech CSE</h3>
-                    <p class="text-indigo-600 font-medium mb-3">Hardware & Systems Engineer</p>
-                    <p class="text-gray-600">Anurag is a B.Tech CSE student specializing in embedded systems, IoT, and robotics. He is driven by a vision to create emotionally intelligent machines that can interact naturally with humans. At the project’s core, Anurag integrates hardware components — from microphones to servo motors — with real-time AI systems to bring the mental health support robot to life. His goal is to bridge the gap between AI empathy and physical interaction.</p>
-                </div>
+            <!-- 2. Mental Health Knowledge Sharing Section -->
+            <section id="knowledge" class="space-y-10">
+                <h2 class="text-4xl font-bold text-center text-gray-800">Knowledge-Driven Care</h2>
+                <p class="text-center text-lg text-gray-600 max-w-3xl mx-auto">Amica's responses are grounded in accredited therapeutic practices, ensuring a safe and beneficial supportive experience.</p>
                 
-                <!-- Team Member 2: Hnin Lae Khaing -->
-                <div class="section-card bg-white p-6 border border-gray-100 text-center">
-                    <div class="mx-auto h-60 w-60 bg-pink-100 rounded-full flex items-center justify-center mb-4 overflow-hidden">
-                        <!-- Path changed to assets/hnin.jpg -->
-                        <img src="assets/Hnin.jpg" 
-                             onerror="this.onerror=null; this.src='https://placehold.co/128x128/fce7f3/db2777?text=Hnin'"
-                             alt="Profile photo of Hnin Lae Khaing" 
-                             class="h-full w-full object-cover rounded-full">
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
+                    <div class="section-card p-6 bg-green-50 border border-green-200 hover:shadow-lg transition">
+                        <h3 class="font-bold text-2xl text-green-700 mb-3">Structured Skill Building</h3>
+                        <p class="text-base text-gray-600 leading-relaxed">Amica guides you through **identifying and challenging unhelpful thoughts** using proven Cognitive Behavioral Therapy frameworks.</p>
                     </div>
-                    <h3 class="text-2xl font-bold text-gray-800">Hnin Lae Khaing, B.Tech CSE</h3>
-                    <p class="text-pink-600 font-medium mb-3">AI & Frontend Lead</p>
-                    <p class="text-gray-600">Hnin is a passionate B.Tech Computer Science student with a strong interest in artificial intelligence, human-computer interaction, and emotional well-being technology. She focuses on building empathetic AI models and user-friendly interfaces that make mental health support more accessible. As the AI and frontend lead, Hnin ensures the robot communicates with warmth and understanding, blending psychology and technology for real impact.</p>
+                    <div class="section-card p-6 bg-blue-50 border border-blue-200 hover:shadow-lg transition">
+                        <h3 class="font-bold text-2xl text-blue-700 mb-3">Immediate Emotional Regulation</h3>
+                        <p class="text-base text-gray-600 leading-relaxed">It facilitates in-the-moment calming exercises like **mindful breathing and sensory grounding** for managing acute anxiety.</p>
+                    </div>
+                    <div class="section-card p-6 bg-pink-50 border border-pink-200 hover:shadow-lg transition">
+                        <h3 class="font-bold text-2xl text-pink-700 mb-3">Ethical and Empathetic Design</h3>
+                        <p class="text-base text-gray-600 leading-relaxed">Safety is paramount. Amica's core logic includes **crisis detection filters** and always prioritizes non-judgmental, empathetic validation.</p>
+                    </div>
+                </div>
+            </section>
+            
+            <!-- 3. Team Member Biographies Section (Retained from original) -->
+            <section id="team" class="space-y-10 py-12">
+                <h2 class="text-4xl font-bold text-center text-gray-800">Meet the Core Team</h2>
+                <p class="text-center text-lg text-gray-600 max-w-3xl mx-auto">Amica was founded by a blend of clinical expertise and advanced AI engineering to ensure safety and effectiveness.</p>
+                
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+                    <!-- Team Member 1: Anurag Batham -->
+                    <div class="section-card bg-white p-6 border border-gray-100 text-center">
+                        <div class="mx-auto h-60 w-60 bg-indigo-100 rounded-full flex items-center justify-center mb-4 overflow-hidden">
+                            <img src="assets/Anurag.jpg" 
+                                    onerror="this.onerror=null; this.src='https://placehold.co/128x128/e0e7ff/4338ca?text=Anurag'"
+                                    alt="Profile photo of Anurag Batham" 
+                                    class="h-full w-full object-cover rounded-full">
+                        </div>
+                        <h3 class="text-2xl font-bold text-gray-800">Anurag Batham, B.Tech CSE</h3>
+                        <p class="text-indigo-600 font-medium mb-3">Hardware & Systems Engineer</p>
+                        <p class="text-gray-600">Anurag is a B.Tech CSE student specializing in embedded systems, IoT, and robotics. He is driven by a vision to create emotionally intelligent machines that can interact naturally with humans. At the project’s core, Anurag integrates hardware components — from microphones to servo motors — with real-time AI systems to bring the mental health support robot to life. His goal is to bridge the gap between AI empathy and physical interaction.</p>
+                    </div>
+                    
+                    <!-- Team Member 2: Hnin Lae Khaing -->
+                    <div class="section-card bg-white p-6 border border-gray-100 text-center">
+                        <div class="mx-auto h-60 w-60 bg-pink-100 rounded-full flex items-center justify-center mb-4 overflow-hidden">
+                            <img src="assets/Hnin.jpg" 
+                                    onerror="this.onerror=null; this.src='https://placehold.co/128x128/fce7f3/db2777?text=Hnin'"
+                                    alt="Profile photo of Hnin Lae Khaing" 
+                                    class="h-full w-full object-cover rounded-full">
+                        </div>
+                        <h3 class="text-2xl font-bold text-gray-800">Hnin Lae Khaing, B.Tech CSE</h3>
+                        <p class="text-pink-600 font-medium mb-3">AI & Frontend Lead</p>
+                        <p class="text-gray-600">Hnin is a passionate B.Tech Computer Science student with a strong interest in artificial intelligence, human-computer interaction, and emotional well-being technology. She focuses on building empathetic AI models and user-friendly interfaces that make mental health support more accessible. As the AI and frontend lead, Hnin ensures the robot communicates with warmth and understanding, blending psychology and technology for real impact.</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 4. Feedback & Direct Connection Session (New) -->
+            <section id="feedback" class="space-y-8 py-12 section-card bg-indigo-50 p-8 border border-indigo-200">
+                <h2 class="text-4xl font-bold text-center text-indigo-800">Your Voice Matters</h2>
+                <p class="text-center text-lg text-indigo-600 max-w-3xl mx-auto">We value your feedback and direct connection with our team. Use the form below to share your thoughts, report issues, or connect with our developers.</p>
+                
+                <form onsubmit="handleContact(event)" class="max-w-xl mx-auto space-y-4 bg-white p-6 rounded-xl shadow-lg">
+                    <div class="space-y-1">
+                        <label for="feedback-name" class="block text-sm font-medium text-gray-700">Your Name</label>
+                        <input id="feedback-name" type="text" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500">
+                    </div>
+                    <div class="space-y-1">
+                        <label for="feedback-email" class="block text-sm font-medium text-gray-700">Your Email</label>
+                        <input id="feedback-email" type="email" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500" required>
+                    </div>
+                    <div class="space-y-1">
+                        <label for="feedback-message" class="block text-sm font-medium text-gray-700">Message / Feedback</label>
+                        <textarea id="feedback-message" rows="4" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500" required></textarea>
+                    </div>
+                    <button type="submit" id="feedback-submit-button" class="w-full px-4 py-3 bg-pink-500 text-white font-semibold rounded-xl hover:bg-pink-600 transition duration-150 shadow-md">
+                        Send Message to Our Team
+                    </button>
+                    <p id="feedback-status" class="text-center text-sm mt-3 min-h-[20px]"></p>
+                </form>
+            </section>
+        </div>
+    </div>
+
+    <!-- 3. AMICA CHATBOT PAGE CONTAINER (New) -->
+    <div id="chatbot-page-container" class="page-container w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 space-y-12 hidden">
+        <h1 class="text-5xl font-extrabold text-center text-gray-900 border-b pb-4">Amica Chatbot: Your Digital Companion</h1>
+        
+        <!-- Chatbot Capabilities -->
+        <section class="section-card bg-white p-8 space-y-6">
+            <h2 class="text-3xl font-bold text-indigo-700">What Amica Chatbot Does</h2>
+            <p class="text-lg text-gray-600">The Amica Chatbot provides a safe space for real-time **mental health supporting conversation**. Based on CBT, it helps you:</p>
+            <ul class="grid grid-cols-1 md:grid-cols-2 gap-4 text-gray-700">
+                <li class="flex items-center"><span class="text-pink-500 mr-2 text-xl">&bull;</span>Identify emotional triggers and thought distortions.</li>
+                <li class="flex items-center"><span class="text-pink-500 mr-2 text-xl">&bull;</span>Practice grounding and emotional regulation techniques.</li>
+                <li class="flex items-center"><span class="text-pink-500 mr-2 text-xl">&bull;</span>Set and review small, actionable wellness goals.</li>
+                <li class="flex items-center"><span class="text-pink-500 mr-2 text-xl">&bull;</span>Receive empathetic, non-judgmental guidance 24/7.</li>
+            </ul>
+        </section>
+
+        <!-- Your Journey Notes Session -->
+        <section class="section-card bg-indigo-50 p-8 space-y-6">
+            <h2 class="text-3xl font-bold text-indigo-700">Your Journey Notes (Powered by Firebase)</h2>
+            <p class="text-lg text-gray-600">Every key reflection from your live sessions with the Amica Chatbot is automatically logged here. This helps you track patterns and progress over time.</p>
+            <div id="journey-notes-container" class="space-y-3 chat-container h-auto max-h-[500px]">
+                <!-- Notes will be rendered here by setupNotesListener and renderNotes functions -->
+                <p class="text-gray-500 italic p-4 text-center">Loading your personal notes...</p>
+            </div>
+        </section>
+
+        <!-- Visit Live Chatbot Session -->
+        <section class="section-card bg-pink-100 p-8 text-center space-y-4">
+            <h2 class="text-3xl font-bold text-pink-700">Engage with the Free Amica Chatbot</h2>
+            <p class="text-xl text-gray-800 max-w-2xl mx-auto">Ready to start a live, private session? Click the button below to be redirected to our full-featured Streamlit application.</p>
+            <a href="https://amicarobot-mwq6taxcz847ppunwsotpb.streamlit.app/" target="_blank" class="inline-block px-10 py-4 text-xl font-bold rounded-xl bg-indigo-600 text-white hover:bg-indigo-700 transition duration-150 shadow-xl">
+                Visit Amica Streamlit Chatbot
+            </a>
+        </section>
+    </div>
+
+    <!-- 4. AMICA ROBOT PAGE CONTAINER (New) -->
+    <div id="robot-page-container" class="page-container w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 space-y-12 hidden">
+        <h1 class="text-5xl font-extrabold text-center text-gray-900 border-b pb-4">The Amica Robot: Physical Support</h1>
+        
+        <!-- Robot Image & Details -->
+        <section class="section-card bg-white p-8 flex flex-col lg:flex-row gap-10 items-center">
+            <div class="lg:w-1/3">
+                <div class="p-8 bg-pink-100 rounded-3xl shadow-2xl">
+                    <img src="assets/amica_robot_product.jpg" 
+                        onerror="this.onerror=null; this.src='https://placehold.co/300x300/e9d5ff/8b5cf6?text=Amica+Robot+Product'"
+                        alt="Amica Robot Product Image" 
+                        class="w-full h-auto rounded-2xl">
+                </div>
+            </div>
+            <div class="lg:w-2/3 space-y-6">
+                <h2 class="text-4xl font-bold text-indigo-700">Product Details: A Companion for the Home</h2>
+                <p class="text-lg text-gray-600">The physical Amica Robot is designed to bring empathetic presence and behavioral nudges into your daily life. It's more than a smart speaker—it's an interactive wellness co-pilot.</p>
+                <div class="grid grid-cols-2 gap-4">
+                    <div class="p-4 bg-gray-50 rounded-lg">
+                        <p class="font-bold text-gray-800">Available User Ages:</p>
+                        <p class="text-gray-600">From **Kids** (with parental guidance) to **Older Adults**. Designed for all.</p>
+                    </div>
+                    <div class="p-4 bg-gray-50 rounded-lg">
+                        <p class="font-bold text-gray-800">Materials:</p>
+                        <p class="text-gray-600">Eco-friendly, durable polymer shell with soft-touch finish.</p>
+                    </div>
                 </div>
             </div>
         </section>
-        
+
+        <!-- Robot Capacities -->
+        <section class="section-card bg-blue-50 p-8 space-y-6">
+            <h2 class="text-3xl font-bold text-blue-700 text-center">Core Capacities of the Robot</h2>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div class="p-4 bg-white rounded-xl shadow-md space-y-2">
+                    <span class="text-4xl text-blue-500 block">&#x1F50A;</span>
+                    <h3 class="font-semibold text-xl text-gray-800">Voice Communication</h3>
+                    <p class="text-gray-600">Engages in mental health supporting conversations using natural, empathetic voice synthesis (TTS).</p>
+                </div>
+                <div class="p-4 bg-white rounded-xl shadow-md space-y-2">
+                    <span class="text-4xl text-pink-500 block">&#x1F4A1;</span>
+                    <h3 class="font-semibold text-xl text-gray-800">Emotional LED Display</h3>
+                    <p class="text-gray-600">Subtly reflects mood and connection status using customizable LED light patterns (e.g., calming blue, anxious red).</p>
+                </div>
+                <div class="p-4 bg-white rounded-xl shadow-md space-y-2">
+                    <span class="text-4xl text-green-500 block">&#x1F4BE;</span>
+                    <h3 class="font-semibold text-xl text-gray-800">Local Sensor Integration</h3>
+                    <p class="text-gray-600">Can offer gentle reminders based on environmental factors (e.g., "Time for a movement break").</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- Order Section -->
+        <section class="section-card bg-green-50 p-8 space-y-6">
+            <h2 class="text-3xl font-bold text-green-700 text-center">Place Your Pre-Order</h2>
+            <p class="text-lg text-gray-600 text-center max-w-2xl mx-auto">Be among the first to bring Amica home. Fill out the form below to secure your unit.</p>
+            
+            <form onsubmit="handleRobotOrder(event)" class="max-w-md mx-auto space-y-4 bg-white p-6 rounded-xl shadow-lg border border-green-200">
+                <div class="space-y-1">
+                    <label for="order-email" class="block text-sm font-medium text-gray-700">Email Address</label>
+                    <input id="order-email" type="email" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-green-500 focus:border-green-500" required>
+                </div>
+                <div class="space-y-1">
+                    <label for="order-quantity" class="block text-sm font-medium text-gray-700">Quantity</label>
+                    <input id="order-quantity" type="number" min="1" value="1" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-green-500 focus:border-green-500" required>
+                </div>
+                <div class="space-y-1">
+                    <label for="order-location" class="block text-sm font-medium text-gray-700">Shipping Location</label>
+                    <input id="order-location" type="text" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-green-500 focus:border-green-500" required>
+                </div>
+                <button type="submit" id="order-submit-button" class="w-full px-4 py-3 bg-green-600 text-white font-semibold rounded-xl hover:bg-green-700 transition duration-150 shadow-md">
+                    Place Order
+                </button>
+                <p id="order-status" class="text-center text-sm mt-3 min-h-[20px]"></p>
+            </form>
+        </section>
     </div>
 
     <!-- Footer -->
@@ -499,82 +643,273 @@ a:active {
         </div>
     </footer>
 
-    <script>
+    <!-- Main Application JavaScript Logic -->
+    <script type="module">
+        import { getFirestore, collection, addDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        
+        // Ensure initial page is set to welcome on load
         document.addEventListener('DOMContentLoaded', () => {
-            const chatInput = document.getElementById('chat-input');
-            const sendButton = document.getElementById('chat-send-button');
-            const chatWindow = document.getElementById('chat-window');
-            const cimDialogueOutput = document.getElementById('cim-dialogue-output');
-            const cimActionOutput = document.getElementById('cim-action-output');
-
-            const appendMessage = (role, text) => {
-                const isAmica = role === 'amica';
-                const messageContainer = document.createElement('div');
-                messageContainer.className = `flex ${isAmica ? 'justify-start' : 'justify-end'}`;
-                
-                const messageBubble = document.createElement('div');
-                messageBubble.className = `p-3 rounded-xl shadow mt-2 ${isAmica ? 'amica-message rounded-tl-none' : 'user-message rounded-br-none'}`;
-                // Use innerHTML to allow basic markdown formatting from Gemini
-                messageBubble.innerHTML = text; 
-                
-                messageContainer.appendChild(messageBubble);
-                chatWindow.appendChild(messageContainer);
-                
-                // Scroll to the bottom
-                chatWindow.scrollTop = chatWindow.scrollHeight;
-            };
-
-            const processPrompt = async () => {
-                const prompt = chatInput.value.trim();
-                if (!prompt) return;
-
-                // 1. UI Update (User Message)
-                appendMessage('user', prompt);
-                chatInput.value = ''; 
-                
-                sendButton.disabled = true;
-                sendButton.textContent = 'Processing...';
-                cimDialogueOutput.textContent = 'CIM is communicating with Amica\'s core intelligence...';
-                cimActionOutput.textContent = 'Running API call...';
-
-                try {
-                    // 2. Call the Gemini API or Demo Fallback
-                    const { response, actionCommand } = await window.callGeminiApi(prompt);
-                    
-                    // 3. Update History
-                    window.USER_STATE.chat_history.push({ role: 'user', text: prompt });
-                    window.USER_STATE.chat_history.push({ role: 'amica', text: response });
-                    
-                    // 4. UI Update (Amica Response)
-                    appendMessage('amica', response);
-                    cimDialogueOutput.innerHTML = `**Amica:** ${response.substring(0, 100)}...`;
-                    cimActionOutput.textContent = actionCommand;
-
-                } catch (error) {
-                    console.error("Chat processing failed and fallback failed (should not happen):", error);
-                    
-                    // Fallback for a catastrophic failure
-                    const criticalErrorMessage = 'A critical error occurred. Please refresh the page.';
-                    appendMessage('amica', criticalErrorMessage);
-                    cimDialogueOutput.textContent = `CRITICAL FAILURE: ${criticalErrorMessage}`;
-                    cimActionOutput.textContent = `CRITICAL_ERROR: ${error.message}`; 
-                } finally {
-                    sendButton.disabled = false;
-                    sendButton.textContent = 'Send';
-                }
-            };
-
-            // Attach event listeners
-            sendButton.addEventListener('click', processPrompt);
-
-            // Optional: allow pressing Enter to submit
-            chatInput.addEventListener('keypress', (e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                    e.preventDefault();
-                    processPrompt();
-                }
-            });
+            // Check if Firebase is configured; if so, auth listener handles the navigation.
+            // If not configured (demo mode), we still start on the welcome page.
+            const isFirebaseConfigured = typeof __firebase_config !== 'undefined' && Object.keys(JSON.parse(__firebase_config)).length > 0;
+            if (!isFirebaseConfigured && !window.isAuthenticated) {
+                window.showPage('welcome-page');
+            }
         });
+
+        // --- CHATBOT UI LOGIC (for the Chatbot page) ---
+        // Note: The main chat UI is still here, but it's on the dedicated Chatbot page now.
+        // I will add a simple note-saving mechanism based on the hidden system prompt.
+        
+        const chatInput = document.getElementById('chat-input');
+        const sendButton = document.getElementById('chat-send-button');
+        const chatWindow = document.getElementById('chat-window-chatbot'); // Use a unique ID
+        const cimDialogueOutput = document.getElementById('cim-dialogue-output');
+        const cimActionOutput = document.getElementById('cim-action-output');
+
+        const appendMessage = (role, text) => {
+            const chatWindowTarget = document.getElementById('chat-window-chatbot');
+            if (!chatWindowTarget) return;
+
+            const isAmica = role === 'amica';
+            const messageContainer = document.createElement('div');
+            messageContainer.className = `flex ${isAmica ? 'justify-start' : 'justify-end'}`;
+            
+            const messageBubble = document.createElement('div');
+            messageBubble.className = `p-3 rounded-xl shadow mt-2 ${isAmica ? 'amica-message rounded-tl-none' : 'user-message rounded-br-none'}`;
+            messageBubble.innerHTML = text; 
+            
+            messageContainer.appendChild(messageBubble);
+            chatWindowTarget.appendChild(messageContainer);
+            
+            // Scroll to the bottom
+            chatWindowTarget.scrollTop = chatWindowTarget.scrollHeight;
+        };
+
+        const saveNote = async (amicaResponse) => {
+            if (window.isDemoMode || !window.currentUserId) return;
+
+            const db = getFirestore(window.firebaseApp);
+            const userId = window.currentUserId;
+            const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+
+            // Regex to extract the hidden note title
+            const noteMatch = amicaResponse.match(/\[Note Title: (.*?)\]/);
+            let noteTitle = noteMatch ? noteMatch[1].trim() : 'Chat Reflection';
+
+            // Remove the hidden note title from the displayed response
+            const cleanResponse = amicaResponse.replace(/\[Note Title: .*?\]/, '').trim();
+            
+            // Save the last user prompt and the clean Amica response
+            const lastUserPrompt = window.USER_STATE.chat_history.length > 0 ? window.USER_STATE.chat_history[window.USER_STATE.chat_history.length - 1].text : "No initial context.";
+            
+            const noteContent = `User: "${lastUserPrompt}"\nAmica: "${cleanResponse}"`;
+
+            try {
+                // Private data path: /artifacts/{appId}/users/{userId}/notes
+                await addDoc(collection(db, `artifacts/${appId}/users/${userId}/notes`), {
+                    topic: noteTitle,
+                    content: noteContent,
+                    timestamp: Date.now(), // Store as milliseconds
+                    userId: userId
+                });
+                console.log("Note saved successfully with title:", noteTitle);
+            } catch (error) {
+                console.error("Error saving note to Firestore:", error);
+            }
+        };
+
+
+        const processPrompt = async () => {
+            const prompt = chatInput.value.trim();
+            if (!prompt) return;
+
+            // 1. UI Update (User Message)
+            appendMessage('user', prompt);
+            chatInput.value = ''; 
+            
+            sendButton.disabled = true;
+            sendButton.textContent = 'Processing...';
+            cimDialogueOutput.textContent = 'CIM is communicating with Amica\'s core intelligence...';
+            cimActionOutput.textContent = 'Running API call...';
+
+            try {
+                // 2. Call the Gemini API or Demo Fallback
+                const { response, actionCommand } = await window.callGeminiApi(prompt);
+                
+                // 3. Update History
+                window.USER_STATE.chat_history.push({ role: 'user', text: prompt });
+                window.USER_STATE.chat_history.push({ role: 'amica', text: response });
+                
+                // 4. Save the conversation as a note (async)
+                saveNote(response);
+
+                // 5. Clean response for display
+                const cleanResponse = response.replace(/\[Note Title: .*?\]/, '').trim();
+                
+                // 6. UI Update (Amica Response)
+                appendMessage('amica', cleanResponse);
+                cimDialogueOutput.innerHTML = `**Amica:** ${cleanResponse.substring(0, 100)}...`;
+                cimActionOutput.textContent = actionCommand;
+
+            } catch (error) {
+                console.error("Chat processing failed:", error);
+                
+                appendMessage('amica', 'I encountered an error. Please try again or check the console for details.');
+                cimActionOutput.textContent = 'ERROR: Chat processing failed.';
+            } finally {
+                sendButton.disabled = false;
+                sendButton.textContent = 'Send';
+            }
+        };
+
+        sendButton.addEventListener('click', processPrompt);
+        chatInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                processPrompt();
+            }
+        });
+
+        // --- FORM HANDLERS (Feedback and Order) ---
+
+        // Feedback Form Handler
+        window.handleContact = async (event) => {
+            event.preventDefault();
+            const form = event.target;
+            const statusElement = document.getElementById('feedback-status');
+            const submitButton = document.getElementById('feedback-submit-button');
+            statusElement.className = 'text-gray-500 text-sm mt-3';
+            statusElement.textContent = 'Sending message...';
+            submitButton.disabled = true;
+
+            const name = document.getElementById('feedback-name').value;
+            const email = document.getElementById('feedback-email').value;
+            const message = document.getElementById('feedback-message').value;
+
+            if (window.isDemoMode) {
+                statusElement.className = 'text-yellow-600 text-sm mt-3';
+                statusElement.textContent = 'Message captured! (In Demo Mode, this data is not persisted to Firestore.)';
+                submitButton.disabled = false;
+                form.reset();
+                return;
+            }
+
+            try {
+                const db = getFirestore(window.firebaseApp);
+                const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+                const userId = window.currentUserId || 'anonymous';
+                
+                // Public data path: /artifacts/{appId}/public/data/feedback
+                await addDoc(collection(db, `artifacts/${appId}/public/data/feedback`), {
+                    name,
+                    email,
+                    message,
+                    userId,
+                    timestamp: Date.now()
+                });
+
+                statusElement.className = 'text-green-600 text-sm mt-3';
+                statusElement.textContent = 'Thank you! Your feedback has been received.';
+                form.reset();
+            } catch (error) {
+                console.error("Error submitting feedback:", error);
+                statusElement.className = 'text-red-600 text-sm mt-3';
+                statusElement.textContent = `Error sending message. Please try again. (${error.message})`;
+            } finally {
+                submitButton.disabled = false;
+            }
+        };
+
+        // Robot Order Form Handler
+        window.handleRobotOrder = async (event) => {
+            event.preventDefault();
+            const form = event.target;
+            const statusElement = document.getElementById('order-status');
+            const submitButton = document.getElementById('order-submit-button');
+            statusElement.className = 'text-gray-500 text-sm mt-3';
+            statusElement.textContent = 'Processing pre-order...';
+            submitButton.disabled = true;
+
+            const email = document.getElementById('order-email').value;
+            const quantity = parseInt(document.getElementById('order-quantity').value);
+            const location = document.getElementById('order-location').value;
+
+            if (window.isDemoMode) {
+                statusElement.className = 'text-yellow-600 text-sm mt-3';
+                statusElement.textContent = `Pre-Order for ${quantity} unit(s) captured! (In Demo Mode, this data is not persisted.)`;
+                submitButton.disabled = false;
+                form.reset();
+                return;
+            }
+
+            try {
+                const db = getFirestore(window.firebaseApp);
+                const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+                const userId = window.currentUserId || 'anonymous';
+
+                // Public data path: /artifacts/{appId}/public/data/orders
+                await addDoc(collection(db, `artifacts/${appId}/public/data/orders`), {
+                    email,
+                    quantity,
+                    location,
+                    userId,
+                    timestamp: Date.now()
+                });
+
+                statusElement.className = 'text-green-600 text-sm mt-3';
+                statusElement.textContent = `Success! Pre-order for ${quantity} Amica Robot(s) placed. Confirmation email sent to ${email}.`;
+                form.reset();
+            } catch (error) {
+                console.error("Error submitting order:", error);
+                statusElement.className = 'text-red-600 text-sm mt-3';
+                statusElement.textContent = `Error placing order. Please try again. (${error.message})`;
+            } finally {
+                submitButton.disabled = false;
+            }
+        };
+
     </script>
+
+    <!-- Chat Interface (Placed at the bottom for structure but linked to the Chatbot Page) -->
+    <div id="hidden-chat-interface" class="w-full max-w-7xl px-4 sm:px-6 lg:px-8 py-12 space-y-10 hidden">
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            <div class="lg:col-span-2 section-card bg-white p-6 border border-gray-100">
+                <h3 class="text-2xl font-semibold text-indigo-600 mb-4">Live Chat Session</h3>
+                <div id="chat-window-chatbot" class="chat-container mb-4 p-4 space-y-4">
+                    <div class="flex justify-start">
+                        <div class="amica-message p-3 rounded-xl rounded-tl-none shadow">
+                            Welcome! I'm Amica, your mental wellness companion. How can I support you on your journey today?
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="flex space-x-3">
+                    <input id="chat-input" type="text" placeholder="Type your message here..." class="flex-grow p-3 border border-gray-300 rounded-xl focus:ring-indigo-500 focus:border-indigo-500 shadow-sm" />
+                    <button id="chat-send-button" class="px-6 py-3 bg-indigo-600 text-white font-semibold rounded-xl hover:bg-indigo-700 transition duration-150 shadow-md">
+                        Send
+                    </button>
+                </div>
+            </div>
+
+            <div class="lg:col-span-1 section-card bg-gray-800 p-6 border border-gray-700">
+                <h3 class="text-2xl font-bold text-white mb-4 border-b border-indigo-400 pb-2">Personal Journey Status (CIM Trace)</h3>
+                <p class="text-gray-400 text-sm mb-4">
+                    This panel reflects the live communication between your browser and Amica's Core Intelligence Module (CIM).
+                </p>
+                <div class="mb-4">
+                    <h4 class="text-lg font-semibold text-pink-400 mb-1">Amica's Dialogue Output</h4>
+                    <div id="cim-dialogue-output" class="p-3 bg-gray-900 rounded-lg text-white font-medium text-sm italic min-h-[50px]">
+                        Awaiting your first message...
+                    </div>
+                </div>
+                <div>
+                    <h4 class="text-lg font-semibold text-purple-400 mb-1">API Status & Action Command</h4>
+                    <div id="cim-action-output" class="p-3 bg-gray-900 rounded-lg text-green-400 font-mono text-xs min-h-[50px] overflow-auto">
+                        Idle: Ready_For_User_Input
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
 </body>
-</html>v
+</html>
